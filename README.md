@@ -11,6 +11,44 @@ zmq-journal-gatewayd-client | systemd-journal-remote -o /path/to/some/dir/ -
 
 Use --help for an overview of all commands.
 
+Mode of Operation
+-----------------
+
+      +----------------+
+      |    journald    |
+      |                |
+      |                |+------------+
+      |                |             |
+      |                |             |syslog
+      +----------------+             |live forwarding
+      +-----+ |                      |udp:514
+      |file | |                      |udp:broadcast
+      +-----+ | journal_api          |
+              |                      |
+              v                      v
+      +----------------+ syslog  +------------+
+      |   "gateway"    |-------->| SYSLOG     |
+      |                |         +------------+
+      |    acts as     |
+      |    journal     | GELF    +------------+
+      |    client      |-------->| GRAYLOG2   |
+      |                |         +------------+
+      |                |                                         +--------------+
+      |                | HTTP    +---------------------------+   |   journald   |
+      |                |-------->| HTTP |     journald-remote|-->|              |
+      |                |         +---------------------------+   |              |
+      |                |                                         |              |
+      |                | ZMTP    +------+    +---------------+   |              |
+      |                |-------->| ZMTP |--->|journald-remote|-->|              |
+      |                |         +------+    +---------------+   |              |
+      |                |                                         |              |
+      |                |                                         |              |
+      +----------------+                                         +--------------+
+                                                                 +-----+  +-----+
+                                                                 |file |  |file |
+                                                                 +-----+  +-----+
+
+
 Installation
 ------------
 

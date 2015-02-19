@@ -20,6 +20,7 @@
 #define ERROR "\004"
 #define TIMEOUT "\005"
 #define STOP "\006"
+#define LOGON "\007"
 
 #define HEARTBEATING 0                          // set to '1' if should always be active
 #define DEFAULT_CLIENT_SOCKET "tcp://localhost:5555"    // the socket the client should connect to
@@ -40,6 +41,7 @@ typedef struct RequestMeta {
     char *since_cursor;
     char *until_cursor;
     bool follow;
+    bool listening;
     bool discrete;
     bool boot;
     char *field;
@@ -76,7 +78,6 @@ void RequestMeta_destruct (RequestMeta *args){
         }
         free(clauses);
     }
-
     free(args);
 }
 

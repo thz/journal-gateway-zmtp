@@ -22,40 +22,41 @@
 /*
  * 'zmq-journal-gatewayd' is a logging gateway for systemd's journald. It 
  * extracts logs from the journal according to given conditions and sends them
- * to a client which requested the logs via a json-object. This object is sent
+ * to a sink which requested the logs via a json-object. This object is sent
  * as a string. As transport ZeroMQ is used. Since the gateway works straight 
  * forward with ZeroMQ sockets you can in general choose how to communicate
- * between gateway and client in the way you can choose this for ZeroMQ sockets.
+ * between source and sink in the way you can choose this for ZeroMQ sockets.
  *
  * A typical query string can look like
  *
  *  " { \"since_timestamp\" : \"2014-04-29T13:23:25Z\" , \"reverse\" : true } "
  *
- * The gateway would then send all logs since the given date until now. Logs are 
+ * The source would then send all logs since the given date until now. Logs are 
  * by default send by newest first, unless you activate the 'reverse' attribute.
  *
  * The gateway can work on (in theory) arbitrary many requests in parallel. The
- * message flow with a client follows the following specification:
+ * message flow with a sink follows the following specification:
  *
- * 1.   The client sends a query string which represents a (valid) json object.
- * 2.   the gateway sends a message ('READY') to acknowledge  the query as a first 
+ * 0.   The source sends a message ('LOGON') to establish the connection.
+ * 1.   The sink sends a query string which represents a (valid) json object.
+ * 2.   the source sends a message ('READY') to acknowledge the query as a first 
  *      response. 
- * 3.   After this initial response the gateway will start sending logs according
+ * 3.   After this initial response the source will start sending logs according
  *      to the given restrictions/conditions. Every log is sent in exactly one 
  *      zmq message. Possible restrictions/conditions can be seen in the 
  *      function definition of 'parse_json'.
- * 4.   If the query response was successful the gateway will close the request
+ * 4.   If the query response was successful the source will close the request
  *      with an additional message ('END').
- *      If the query response was not (fully) successful the gateway will send 
+ *      If the query response was not (fully) successful the source will send 
  *      an error message ('ERROR').
  *      Another possibility regards a timeout due to heartbeating:
- * 5.   The gateway will always accept heartbeating messages ('HEARTBEAT') from
- *      a client but in general it is optional. Only if the follow functionality
- *      is used the gateway will expect a heartbeating by the client. If the 
- *      client misses a heartbeat the gateway will respond with a 'TIMEOUT'
+ * 5.   The source will always accept heartbeating messages ('HEARTBEAT') from
+ *      a sink but in general it is optional. Only if the follow functionality
+ *      is used the source will expect a heartbeating by the sink. If the 
+ *      sink misses a heartbeat the source will respond with a 'TIMEOUT'
  *      message and close the response stream. 
- * 6.   The client can stop the response stream of the gateway by sending a 'STOP' 
- *      message to the gateway. The gateway will respond with a 'STOP' message 
+ * 6.   The sink can stop the response stream of the source by sending a 'STOP' 
+ *      message to the source. The source will respond with a 'STOP' message 
  *      and close the response stream.
  */
 
@@ -65,6 +66,7 @@
 #include <assert.h>
 #include <time.h>
 #include <systemd/sd-journal.h>
+#include <systemd/sd-id128.h>
 #include <inttypes.h>
 #include <signal.h>
 #include <stdint.h>
@@ -101,7 +103,7 @@ void set_matches(json_t *json_args, char *key, RequestMeta *args){
     if( json_array != NULL ){
 
         /*  
-            The gateway accepets matches in form of boolean formulas.
+            The source accepts matches in form of boolean formulas.
             These formulas are represented in KNF such that every clause
             is represented as one array. The whole boolean formula is
             represented as an array of clauses/arrays. For example
@@ -230,6 +232,7 @@ RequestMeta *parse_json(zmsg_t* query_msg){
     args->since_cursor = get_arg_string(json_args, "since_cursor");
     args->until_cursor = get_arg_string(json_args, "until_cursor");
     args->follow = get_arg_bool(json_args, "follow");
+    args->listening = get_arg_bool(json_args, "listen");
     args->discrete = get_arg_bool(json_args, "discrete");
     args->boot = get_arg_bool(json_args, "boot");
     args->field = get_arg_string(json_args, "field");
@@ -433,7 +436,7 @@ static void *handler_routine (void *_args) {
     RequestMeta *args = (RequestMeta *) _args;
     zctx_t *ctx = zctx_new ();
     void *query_handler = zsocket_new (ctx, ZMQ_DEALER);
-    zsocket_set_sndhwm (query_handler, HANDLER_HWM);
+    //zsocket_set_sndhwm (query_handler, HANDLER_HWM);
     int rc = zsocket_connect (query_handler, BACKEND_SOCKET);
 
     /* send READY to the client */
@@ -451,6 +454,7 @@ static void *handler_routine (void *_args) {
     /* create and adjust the journal pointer according to the information in args */
     sd_journal *j;
     sd_journal_open(&j, SD_JOURNAL_LOCAL_ONLY);
+    //sd_journal_open_directory(&j, "/var/log/journal", 0);
     adjust_journal(args, j);
 
     uint64_t heartbeat_at = zclock_time () + HANDLER_HEARTBEAT_INTERVAL;
@@ -470,26 +474,13 @@ static void *handler_routine (void *_args) {
 
         if (items[0].revents & ZMQ_POLLIN){
             char *client_msg = zstr_recv (query_handler);
-            if( strcmp(client_msg, HEARTBEAT) == 0 ){
-                /* client sent heartbeat, only necessary when 'follow' is active */
-                send_flag(args->client_ID, query_handler, NULL, HEARTBEAT);
-                sd_journal_print(LOG_DEBUG, "received heartbeat, sending it back ...");
-                heartbeat_at = zclock_time () + HANDLER_HEARTBEAT_INTERVAL;
-            }
-            else if( strcmp(client_msg, STOP) == 0 ){
+            if( strcmp(client_msg, STOP) == 0 ){
                 /* client wants no more logs */
                 send_flag_wrapper (j, args, query_handler, ctx, "confirmed stop", STOP);
                 free (client_msg);
-                benchmark(initial_time, log_counter);
                 return NULL;
             }
             free (client_msg);
-        }
-
-        /* timeout from client, only true when 'follow' is active and client does no heartbeating */
-        if (zclock_time () >= heartbeat_at && args->follow) {
-            send_flag_wrapper (j, args, query_handler, ctx, "Client Timeout", TIMEOUT);
-            return NULL;
         }
 
         /* move forwards or backwards? default is backwards */
@@ -505,7 +496,6 @@ static void *handler_routine (void *_args) {
             get_entry_string( j, args, &entry_string, &entry_string_size ); 
             if ( memcmp(entry_string, END, strlen(END)) == 0 ){
                 send_flag_wrapper (j, args, query_handler, ctx, "query finished successfully", END);
-                benchmark(initial_time, log_counter);
                 return NULL;
             }
             else if ( memcmp(entry_string, ERROR, strlen(ERROR)) == 0 ){
@@ -519,12 +509,11 @@ static void *handler_routine (void *_args) {
                 zmsg_t *entry_msg = build_entry_msg(args->client_ID, entry_string, entry_string_size);
                 free (entry_string);
                 zmsg_send (&entry_msg, query_handler);
-                log_counter++;
             }
         }
         /* end of journal and 'follow' active? => wait some time */
         else if ( rc == 0 && args->follow ){
-            sd_journal_wait( j, (uint64_t) WAIT_TIMEOUT );
+            sd_journal_wait( j, (uint64_t) -1 );
         }
         /* in case moving the journal pointer around produced an error */
         else if ( rc < 0 ){
@@ -537,6 +526,86 @@ static void *handler_routine (void *_args) {
             benchmark(initial_time, log_counter);
             return NULL;
         }
+
+    // while (loop_counter > 0 || args->at_most == -1) {
+
+    //     loop_counter--;
+        
+    //     rc = zmq_poll (items, 1, 0);
+    //     if( rc == -1 ){
+    //         send_flag_wrapper (j, args, query_handler, ctx, "error in zmq poll", ERROR);
+    //         return NULL;
+    //     }
+
+    //     if (items[0].revents & ZMQ_POLLIN){
+    //         char *client_msg = zstr_recv (query_handler);
+    //         if( strcmp(client_msg, HEARTBEAT) == 0 ){
+    //             /* client sent heartbeat, only necessary when 'follow' is active */
+    //             send_flag(args->client_ID, query_handler, NULL, HEARTBEAT);
+    //             sd_journal_print(LOG_DEBUG, "received heartbeat, sending it back ...");
+    //             heartbeat_at = zclock_time () + HANDLER_HEARTBEAT_INTERVAL;
+    //         }
+    //         else if( strcmp(client_msg, STOP) == 0 ){
+    //             /* client wants no more logs */
+    //             send_flag_wrapper (j, args, query_handler, ctx, "confirmed stop", STOP);
+    //             free (client_msg);
+    //             benchmark(initial_time, log_counter);
+    //             return NULL;
+    //         }
+    //         free (client_msg);
+    //     }
+
+    //     /* timeout from client, only true when 'follow' is active and client does no heartbeating */
+    //     if (zclock_time () >= heartbeat_at && args->follow) {
+    //         send_flag_wrapper (j, args, query_handler, ctx, "Client Timeout", TIMEOUT);
+    //         return NULL;
+    //     }
+
+    //     /* move forwards or backwards? default is backwards */
+    //     if( args->reverse == false )
+    //         rc = sd_journal_next(j);
+    //     else
+    //         rc = sd_journal_previous(j);
+
+    //     /* try to send new entry if there is one */
+    //     if( rc == 1 ){
+    //         size_t entry_string_size;
+    //         char *entry_string;
+    //         get_entry_string( j, args, &entry_string, &entry_string_size ); 
+    //         if ( memcmp(entry_string, END, strlen(END)) == 0 ){
+    //             send_flag_wrapper (j, args, query_handler, ctx, "query finished successfully", END);
+    //             benchmark(initial_time, log_counter);
+    //             return NULL;
+    //         }
+    //         else if ( memcmp(entry_string, ERROR, strlen(ERROR)) == 0 ){
+    //             send_flag(args->client_ID, query_handler, ctx, ERROR);
+    //             sd_journal_close( j );
+    //             RequestMeta_destruct(args);
+    //             return NULL;
+    //         }
+    //         /* no problems with the new entry, send it */
+    //         else{
+    //             zmsg_t *entry_msg = build_entry_msg(args->client_ID, entry_string, entry_string_size);
+    //             free (entry_string);
+    //             zmsg_send (&entry_msg, query_handler);
+    //             log_counter++;
+    //         }
+    //     }
+    //     /* end of journal and 'follow' active? => wait some time */
+    //     else if ( rc == 0 && args->follow ){
+    //         sd_journal_wait( j, (uint64_t) WAIT_TIMEOUT );
+    //     }
+    //     /* in case moving the journal pointer around produced an error */
+    //     else if ( rc < 0 ){
+    //         send_flag_wrapper (j, args, query_handler, ctx, "journald API produced error", ERROR);
+    //         return NULL;
+    //     }
+    //     /* query finished, send END and close the thread */
+    //     else {
+    //         send_flag_wrapper (j, args, query_handler, ctx, "query finished successfully", END);
+    //         benchmark(initial_time, log_counter);
+    //         return NULL;
+    //     }
 
         /* debugging or throtteling */
         nanosleep(&tim1 , &tim2);
@@ -590,20 +659,25 @@ The zmq-journal-gatewayd-client can connect to the given socket.\n"
     // Socket to talk to clients
     void *frontend = zsocket_new (ctx, ZMQ_ROUTER);
     assert(frontend);
-    zsocket_set_sndhwm (frontend, GATEWAY_HWM);
-    zsocket_set_rcvhwm (frontend, GATEWAY_HWM);
+    //zsocket_set_sndhwm (frontend, GATEWAY_HWM);
+    //zsocket_set_rcvhwm (frontend, GATEWAY_HWM);
 
+    // if(gateway_socket_address != NULL)
+    //     zsocket_bind (frontend, gateway_socket_address);
+    // else
+    //     zsocket_bind (frontend, DEFAULT_FRONTEND_SOCKET);
     if(gateway_socket_address != NULL)
-        zsocket_bind (frontend, gateway_socket_address);
+        zsocket_connect (frontend, gateway_socket_address);
     else
-        zsocket_bind (frontend, DEFAULT_FRONTEND_SOCKET);
+        zsocket_connect (frontend, DEFAULT_FRONTEND_SOCKET);
 
     // Socket to talk to the query handlers
     void *backend = zsocket_new (ctx, ZMQ_ROUTER);
     assert(backend);
-    zsocket_set_sndhwm (backend, GATEWAY_HWM);
-    zsocket_set_rcvhwm (backend, GATEWAY_HWM);
-    zsocket_bind (backend, BACKEND_SOCKET);
+    //zsocket_set_sndhwm (backend, GATEWAY_HWM);
+    //zsocket_set_rcvhwm (backend, GATEWAY_HWM);
+    // zsocket_bind (backend, BACKEND_SOCKET);
+    zsocket_connect(backend,BACKEND_SOCKET);
 
     /* for stopping the gateway via keystroke (ctrl-c) */
     signal(SIGINT, stop_gateway);
@@ -613,13 +687,15 @@ The zmq-journal-gatewayd-client can connect to the given socket.\n"
         {frontend, 0, ZMQ_POLLIN, 0},
         {backend, 0, ZMQ_POLLIN, 0},
     };
+    /* initiate connection to the sink */
+    send_flag( NULL, frontend, NULL, LOGON );
 
     zhash_t *connections = zhash_new ();
     Connection *lookup;
     zmsg_t *msg;
     RequestMeta *args; 
     while ( active ) {
-        zmq_poll (items, 2, -1);
+        zmq_poll (items, 2, 0);
 
         if (items[0].revents & ZMQ_POLLIN) {
             msg = zmsg_recv (frontend);
@@ -693,5 +769,4 @@ The zmq-journal-gatewayd-client can connect to the given socket.\n"
     zctx_destroy (&ctx); 
     sd_journal_print(LOG_INFO, "...gateway stopped");
     return 0;
-
 }
