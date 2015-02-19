@@ -8,6 +8,11 @@ Logs are available in plain text or an 'export' format suitable for storing them
 ```bash
 zmq-journal-gatewayd-client | systemd-journal-remote -o /path/to/some/dir/ -
 ```
+Mind the - at the end.
+If you want to use the gateway as a relay you need to store the received logs into the local journal directory:
+```bash
+zmq-journal-gatewayd-client | systemd-journal-remote -o /var/log/journal/[machine-id]
+```
 
 Use --help for an overview of all commands.
 
