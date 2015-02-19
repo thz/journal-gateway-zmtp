@@ -244,7 +244,7 @@ The client is used to connect to zmq-journal-gatewayd via the '--socket' option.
 
     /* initial setup */
     ctx = zctx_new ();
-    client = zsocket_new (ctx, ZMQ_DEALER);
+    client = zsocket_new (ctx, ZMQ_ROUTER);
     //zsocket_set_rcvhwm (client, CLIENT_HWM);
 
     // if(client_socket_address != NULL)
@@ -255,10 +255,10 @@ The client is used to connect to zmq-journal-gatewayd via the '--socket' option.
     if(client_socket_address != NULL)
         zsocket_bind (client, client_socket_address);
     else
-        zsocket_bind (client, DEFAULT_CLIENT_SOCKET);
+        zsocket_bind (client, DEFAULT_FRONTEND_SOCKET);
 
     /* for stopping the client and the gateway handler via keystroke (ctrl-c) */
-    signal(SIGINT, stop_handler);
+    //signal(SIGINT, stop_handler);
 
     zmq_pollitem_t items [] = {
         { client, 0, ZMQ_POLLIN, 0 },

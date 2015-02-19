@@ -266,12 +266,10 @@ zmsg_t *build_entry_msg(zframe_t *ID, char *entry_string, int entry_string_size)
     zmsg_push (msg, ID_dup);
     return msg;
 }
-void send_flag( zframe_t *ID, void *socket, zctx_t *ctx, char *flag){
+void send_flag(void *socket, zctx_t *ctx, char *flag){
     zmsg_t *msg = zmsg_new();
-    zframe_t *ID_dup = zframe_dup (ID);
     zframe_t *flag_frame = zframe_new ( flag, strlen(flag) + 1 );
     zmsg_push (msg, flag_frame);
-    zmsg_push (msg, ID_dup);
 
     /* ID will not be destroyed! */
     zmsg_send (&msg, socket);
@@ -426,7 +424,7 @@ void benchmark( uint64_t initial_time, int log_counter ) {
 
 void send_flag_wrapper (sd_journal *j, RequestMeta *args, void *socket, zctx_t *ctx, const char *message, char *flag) {
     sd_journal_print(LOG_DEBUG, message);
-    send_flag(args->client_ID, socket, ctx, flag);
+    send_flag(socket, ctx, flag);
     sd_journal_close( j );
     RequestMeta_destruct(args);
     return;
@@ -440,7 +438,7 @@ static void *handler_routine (void *_args) {
     int rc = zsocket_connect (query_handler, BACKEND_SOCKET);
 
     /* send READY to the client */
-    send_flag( args->client_ID, query_handler, NULL, READY );
+    send_flag(query_handler, NULL, READY );
 
     zmq_pollitem_t items [] = {
         { query_handler, 0, ZMQ_POLLIN, 0 },
@@ -499,7 +497,7 @@ static void *handler_routine (void *_args) {
                 return NULL;
             }
             else if ( memcmp(entry_string, ERROR, strlen(ERROR)) == 0 ){
-                send_flag(args->client_ID, query_handler, ctx, ERROR);
+                send_flag(query_handler, ctx, ERROR);
                 sd_journal_close( j );
                 RequestMeta_destruct(args);
                 return NULL;
@@ -657,7 +655,7 @@ The zmq-journal-gatewayd-client can connect to the given socket.\n"
     zctx_t *ctx = zctx_new ();
 
     // Socket to talk to clients
-    void *frontend = zsocket_new (ctx, ZMQ_ROUTER);
+    void *frontend = zsocket_new (ctx, ZMQ_DEALER);
     assert(frontend);
     //zsocket_set_sndhwm (frontend, GATEWAY_HWM);
     //zsocket_set_rcvhwm (frontend, GATEWAY_HWM);
@@ -666,10 +664,14 @@ The zmq-journal-gatewayd-client can connect to the given socket.\n"
     //     zsocket_bind (frontend, gateway_socket_address);
     // else
     //     zsocket_bind (frontend, DEFAULT_FRONTEND_SOCKET);
+	if (!getenv(TARGET_ADDRESS_ENV)) {
+		fprintf(stderr, "%s not specified.\n", TARGET_ADDRESS_ENV);
+		exit(1);
+	}
     if(gateway_socket_address != NULL)
         zsocket_connect (frontend, gateway_socket_address);
     else
-        zsocket_connect (frontend, DEFAULT_FRONTEND_SOCKET);
+        zsocket_connect (frontend, getenv(TARGET_ADDRESS_ENV));
 
     // Socket to talk to the query handlers
     void *backend = zsocket_new (ctx, ZMQ_ROUTER);
@@ -688,7 +690,7 @@ The zmq-journal-gatewayd-client can connect to the given socket.\n"
         {backend, 0, ZMQ_POLLIN, 0},
     };
     /* initiate connection to the sink */
-    send_flag( NULL, frontend, NULL, LOGON );
+    send_flag(frontend, NULL, LOGON );
 
     zhash_t *connections = zhash_new ();
     Connection *lookup;
@@ -720,7 +722,7 @@ The zmq-journal-gatewayd-client can connect to the given socket.\n"
                 /* if args was invalid answer with error */
                 else{
                     sd_journal_print(LOG_INFO, "got invalid query");
-                    send_flag( client_ID, frontend, NULL, ERROR );
+                    send_flag(frontend, NULL, ERROR );
                     zframe_destroy (&client_ID);
                 }
             }
