@@ -7,7 +7,7 @@ DESTDIR = /usr/bin
 SERVICE_DIR = /etc/systemd/system
 
 CC = gcc
-CFLAGS = -c -O0 -ggdb #-Wall -Wextra
+CFLAGS = -c -O0 -ggdb # -Wall #-Wextra
 LDFLAGS = -L/usr/local/lib -lzmq -lczmq -ljansson 
 SYSTEMD_FLAGS = -lsystemd-id128
 

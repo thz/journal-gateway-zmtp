@@ -117,7 +117,7 @@ void stop_handler(int dummy) {
 }
 
 /* Do sth with the received message */
-int response_handler(zmsg_t *response){
+int response_handler(zframe_t* cid, zmsg_t *response){
     zframe_t *frame;
     void *frame_data;
     size_t frame_size;
@@ -142,10 +142,17 @@ int response_handler(zmsg_t *response){
         else if( memcmp( frame_data, LOGON, strlen(LOGON) ) == 0 ){
             /* send query as first response */
             char *query_string = build_query_string();
-            zstr_send (client, query_string);
+			zmsg_t *m = zmsg_new(); assert(m);
+			zframe_t *queryframe = zframe_new(query_string, strlen(query_string)+1);
+			assert(queryframe);
+			zmsg_push(m, queryframe);
+			zmsg_push(m, cid);
+			zmsg_send (&m, client);
+			fprintf(stderr, "LOGON received; sending [%s]\n", query_string);
             free(query_string);
         }
         else{
+			assert(((char*)frame_data)[0] == '_');
             write(1, "\n", 1);
             write(1, frame_data, frame_size);
             log_counter++;
@@ -245,6 +252,7 @@ The client is used to connect to zmq-journal-gatewayd via the '--socket' option.
     /* initial setup */
     ctx = zctx_new ();
     client = zsocket_new (ctx, ZMQ_ROUTER);
+	assert(client);
     //zsocket_set_rcvhwm (client, CLIENT_HWM);
 
     // if(client_socket_address != NULL)
@@ -280,7 +288,8 @@ The client is used to connect to zmq-journal-gatewayd via the '--socket' option.
             break;
         if(items[0].revents & ZMQ_POLLIN){
             response = zmsg_recv(client);
-            rc = response_handler(response);
+			zframe_t *client_ID = zmsg_pop (response);
+            rc = response_handler(client_ID, response);
             zmsg_destroy (&response);
             /* end of log stream? */
             if (rc != 0)

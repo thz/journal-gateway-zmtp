@@ -90,7 +90,7 @@ systemctl start zmq-journal-gatewayd    # binds by default on "tcp://*:5555"
 ```
 
 If you need other sockets you can write a configuration file for the service:
-The service looks for a configuration file named "zmq_gateway.conf" in the directory "/home/tpiadmin/conf". You can change the socket there (this only has an effect, if you execute the gateway as a systemd unit).
+The service looks for a configuration file named "zmq_gateway.conf" in the directory "~/conf". You can change the socket there (this only has an effect, if you execute the gateway as a systemd unit).
 
 
 You can start the client via:
