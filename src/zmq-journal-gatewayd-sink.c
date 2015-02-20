@@ -148,7 +148,6 @@ int response_handler(zframe_t* cid, zmsg_t *response){
 			zmsg_push(m, queryframe);
 			zmsg_push(m, cid);
 			zmsg_send (&m, client);
-			fprintf(stderr, "LOGON received; sending [%s]\n", query_string);
             free(query_string);
         }
         else{

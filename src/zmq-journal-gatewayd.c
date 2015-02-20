@@ -698,12 +698,10 @@ The zmq-journal-gatewayd-client can connect to the given socket.\n"
 
         if (items[0].revents & ZMQ_POLLIN) {
             msg = zmsg_recv (frontend);
-			fprintf(stderr, "msg received.\n");
 
                 args = parse_json(msg);
                 /* if query is valid open query handler and pass args to it */
                 if (args != NULL) {
-					fprintf(stderr, "args != NULL\n");
                     zthread_new (handler_routine, (void *) args);
                 }
                 /* if args was invalid answer with error */
