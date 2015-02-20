@@ -522,86 +522,6 @@ static void *handler_routine (void *_args) {
             return NULL;
         }
 
-    // while (loop_counter > 0 || args->at_most == -1) {
-
-    //     loop_counter--;
-        
-    //     rc = zmq_poll (items, 1, 0);
-    //     if( rc == -1 ){
-    //         send_flag_wrapper (j, args, query_handler, ctx, "error in zmq poll", ERROR);
-    //         return NULL;
-    //     }
-
-    //     if (items[0].revents & ZMQ_POLLIN){
-    //         char *client_msg = zstr_recv (query_handler);
-    //         if( strcmp(client_msg, HEARTBEAT) == 0 ){
-    //             /* client sent heartbeat, only necessary when 'follow' is active */
-    //             send_flag(args->client_ID, query_handler, NULL, HEARTBEAT);
-    //             sd_journal_print(LOG_DEBUG, "received heartbeat, sending it back ...");
-    //             heartbeat_at = zclock_time () + HANDLER_HEARTBEAT_INTERVAL;
-    //         }
-    //         else if( strcmp(client_msg, STOP) == 0 ){
-    //             /* client wants no more logs */
-    //             send_flag_wrapper (j, args, query_handler, ctx, "confirmed stop", STOP);
-    //             free (client_msg);
-    //             benchmark(initial_time, log_counter);
-    //             return NULL;
-    //         }
-    //         free (client_msg);
-    //     }
-
-    //     /* timeout from client, only true when 'follow' is active and client does no heartbeating */
-    //     if (zclock_time () >= heartbeat_at && args->follow) {
-    //         send_flag_wrapper (j, args, query_handler, ctx, "Client Timeout", TIMEOUT);
-    //         return NULL;
-    //     }
-
-    //     /* move forwards or backwards? default is backwards */
-    //     if( args->reverse == false )
-    //         rc = sd_journal_next(j);
-    //     else
-    //         rc = sd_journal_previous(j);
-
-    //     /* try to send new entry if there is one */
-    //     if( rc == 1 ){
-    //         size_t entry_string_size;
-    //         char *entry_string;
-    //         get_entry_string( j, args, &entry_string, &entry_string_size ); 
-    //         if ( memcmp(entry_string, END, strlen(END)) == 0 ){
-    //             send_flag_wrapper (j, args, query_handler, ctx, "query finished successfully", END);
-    //             benchmark(initial_time, log_counter);
-    //             return NULL;
-    //         }
-    //         else if ( memcmp(entry_string, ERROR, strlen(ERROR)) == 0 ){
-    //             send_flag(args->client_ID, query_handler, ctx, ERROR);
-    //             sd_journal_close( j );
-    //             RequestMeta_destruct(args);
-    //             return NULL;
-    //         }
-    //         /* no problems with the new entry, send it */
-    //         else{
-    //             zmsg_t *entry_msg = build_entry_msg(args->client_ID, entry_string, entry_string_size);
-    //             free (entry_string);
-    //             zmsg_send (&entry_msg, query_handler);
-    //             log_counter++;
-    //         }
-    //     }
-    //     /* end of journal and 'follow' active? => wait some time */
-    //     else if ( rc == 0 && args->follow ){
-    //         sd_journal_wait( j, (uint64_t) WAIT_TIMEOUT );
-    //     }
-    //     /* in case moving the journal pointer around produced an error */
-    //     else if ( rc < 0 ){
-    //         send_flag_wrapper (j, args, query_handler, ctx, "journald API produced error", ERROR);
-    //         return NULL;
-    //     }
-    //     /* query finished, send END and close the thread */
-    //     else {
-    //         send_flag_wrapper (j, args, query_handler, ctx, "query finished successfully", END);
-    //         benchmark(initial_time, log_counter);
-    //         return NULL;
-    //     }
-
         /* debugging or throtteling */
         nanosleep(&tim1 , &tim2);
     }
@@ -657,10 +577,6 @@ The zmq-journal-gatewayd-client can connect to the given socket.\n"
     //zsocket_set_sndhwm (frontend, GATEWAY_HWM);
     //zsocket_set_rcvhwm (frontend, GATEWAY_HWM);
 
-    // if(gateway_socket_address != NULL)
-    //     zsocket_bind (frontend, gateway_socket_address);
-    // else
-    //     zsocket_bind (frontend, DEFAULT_FRONTEND_SOCKET);
 	if (!getenv(TARGET_ADDRESS_ENV)) {
 		fprintf(stderr, "%s not specified.\n", TARGET_ADDRESS_ENV);
 		exit(1);
@@ -676,7 +592,6 @@ The zmq-journal-gatewayd-client can connect to the given socket.\n"
     //zsocket_set_sndhwm (backend, GATEWAY_HWM);
     //zsocket_set_rcvhwm (backend, GATEWAY_HWM);
     zsocket_bind (backend, BACKEND_SOCKET);
-    //zsocket_connect(backend,BACKEND_SOCKET);
 
     /* for stopping the gateway via keystroke (ctrl-c) */
     signal(SIGINT, stop_gateway);

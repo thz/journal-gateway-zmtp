@@ -122,6 +122,7 @@ int response_handler(zframe_t* cid, zmsg_t *response){
     void *frame_data;
     size_t frame_size;
     int more;
+    FILE *sjr;
 
     do{
         frame = zmsg_pop (response);
@@ -130,6 +131,9 @@ int response_handler(zframe_t* cid, zmsg_t *response){
         frame_data = zframe_data(frame);
         if( memcmp( frame_data, END, strlen(END) ) == 0 ){
             zframe_destroy (&frame);
+            fprintf(stderr, "closing the stream\n");
+            pclose(sjr);
+            if (listening) return 0;
             return 1;
         }
         else if( memcmp( frame_data, ERROR, strlen(ERROR) ) == 0 ){
@@ -152,8 +156,17 @@ int response_handler(zframe_t* cid, zmsg_t *response){
         }
         else{
 			assert(((char*)frame_data)[0] == '_');
-            write(1, "\n", 1);
-            write(1, frame_data, frame_size);
+
+            char pathtojournalfile[127];
+            char* journalname = zframe_strhex(cid);
+            sprintf (pathtojournalfile, "/lib/systemd/systemd-journal-remote -o %s/%s.journal -", getenv(REMOTE_JOURNAL_DIRECTORY), journalname);
+            sjr = popen(pathtojournalfile, "w");
+            fprintf(stderr, "inserted path: %s\n", pathtojournalfile);
+            int fd = fileno(sjr);
+            fprintf(stderr, "process number: %i\n", fd);
+            write(fd, "\n", 1);
+            write(fd, frame_data, frame_size);
+            fprintf(stderr, "after atempt to write to journal\n" );
             log_counter++;
         }
         zframe_destroy (&frame);
@@ -254,11 +267,6 @@ The client is used to connect to zmq-journal-gatewayd via the '--socket' option.
 	assert(client);
     //zsocket_set_rcvhwm (client, CLIENT_HWM);
 
-    // if(client_socket_address != NULL)
-    //     zsocket_connect (client, client_socket_address);
-    // else
-    //     zsocket_connect (client, DEFAULT_CLIENT_SOCKET);
-
     if(client_socket_address != NULL)
         zsocket_bind (client, client_socket_address);
     else
@@ -278,6 +286,12 @@ The client is used to connect to zmq-journal-gatewayd via the '--socket' option.
     uint64_t server_heartbeat_at = zclock_time () + SERVER_HEARTBEAT_INTERVAL;  // the absolute time after which a server timeout occours, 
                                                                                 // updated with every new message (doesn't need to be a heartbeat)
     initial_time = zclock_time ();
+
+    zhash_t *connections = zhash_new ();
+    if (!getenv(REMOTE_JOURNAL_DIRECTORY)) {
+        fprintf(stderr, "%s not specified.\n", REMOTE_JOURNAL_DIRECTORY);
+        exit(1);
+    }
                                                                                 
     /* receive logs, initiate connections to new sources, respond to heartbeats */
     while (active){
@@ -288,6 +302,7 @@ The client is used to connect to zmq-journal-gatewayd via the '--socket' option.
         if(items[0].revents & ZMQ_POLLIN){
             response = zmsg_recv(client);
 			zframe_t *client_ID = zmsg_pop (response);
+
             rc = response_handler(client_ID, response);
             zmsg_destroy (&response);
             /* end of log stream? */
@@ -295,45 +310,6 @@ The client is used to connect to zmq-journal-gatewayd via the '--socket' option.
                 break;            
         }
     }
-
-    // while (active) {
-
-    //     rc = zmq_poll (items, 1, 0);
-    //     if( rc == 0 && heartbeating ){
-    //         /* no message from server so far => send heartbeat */
-    //         zstr_send (client, HEARTBEAT);
-    //         heartbeat_at = zclock_time () + HEARTBEAT_INTERVAL;
-    //     }
-    //     else if ( rc > 0 ) 
-    //         /* message from server arrived => update the timeout interval */
-    //         server_heartbeat_at = zclock_time () +  SERVER_HEARTBEAT_INTERVAL;
-    //     else if( rc == -1 ) 
-    //         /* something went wrong */
-    //         break;
-
-    //     if(zclock_time () >= server_heartbeat_at){ 
-    //         //printf("<< SERVER TIMEOUT >>\n");
-    //         break;
-    //     }
-
-    //     /* receive message and do sth with it */
-    //     if (items[0].revents & ZMQ_POLLIN){ 
-    //         response = zmsg_recv(client);
-    //         rc = response_handler(response);
-    //         zmsg_destroy (&response);
-    //         /* end of log stream? */
-    //         if (rc != 0)
-    //             break;
-    //     }
-
-    //     /* the server also expects heartbeats while he is sending messages */
-    //     if (zclock_time () >= heartbeat_at && heartbeating) {
-    //         zstr_send (client, HEARTBEAT);
-    //         heartbeat_at = zclock_time () + HEARTBEAT_INTERVAL;
-    //     }
-    // }
-
-    printf("\n");
 
     /* clear everything up */
     zsocket_destroy (ctx, client);
