@@ -124,6 +124,26 @@ int response_handler(zframe_t* cid, zmsg_t *response){
     int more;
     FILE *sjr;
 
+            char pathtojournalfile[256];
+			const char sjr_cmd_format[] = "/lib/systemd/systemd-journal-remote -o %s/%s.journal -";
+
+			const char *remote_journal_directory = getenv(REMOTE_JOURNAL_DIRECTORY);
+
+			assert(remote_journal_directory);
+
+			assert(cid);
+            char* journalname = zframe_strhex(cid);
+			assert(journalname);
+
+			assert(strlen(REMOTE_JOURNAL_DIRECTORY) + strlen(journalname) + sizeof(sjr_cmd_format));
+
+            sprintf (pathtojournalfile, sjr_cmd_format, remote_journal_directory, journalname);
+
+            sjr = popen(pathtojournalfile, "w");
+            fprintf(stderr, "inserted path: %s\n", pathtojournalfile);
+            int fd = fileno(sjr);
+            fprintf(stderr, "process number: %i\n", fd);
+
     do{
         frame = zmsg_pop (response);
         frame_size = zframe_size(frame);
@@ -131,8 +151,6 @@ int response_handler(zframe_t* cid, zmsg_t *response){
         frame_data = zframe_data(frame);
         if( memcmp( frame_data, END, strlen(END) ) == 0 ){
             zframe_destroy (&frame);
-            fprintf(stderr, "closing the stream\n");
-            pclose(sjr);
             if (listening) return 0;
             return 1;
         }
@@ -157,13 +175,6 @@ int response_handler(zframe_t* cid, zmsg_t *response){
         else{
 			assert(((char*)frame_data)[0] == '_');
 
-            char pathtojournalfile[127];
-            char* journalname = zframe_strhex(cid);
-            sprintf (pathtojournalfile, "/lib/systemd/systemd-journal-remote -o %s/%s.journal -", getenv(REMOTE_JOURNAL_DIRECTORY), journalname);
-            sjr = popen(pathtojournalfile, "w");
-            fprintf(stderr, "inserted path: %s\n", pathtojournalfile);
-            int fd = fileno(sjr);
-            fprintf(stderr, "process number: %i\n", fd);
             write(fd, "\n", 1);
             write(fd, frame_data, frame_size);
             fprintf(stderr, "after atempt to write to journal\n" );
@@ -171,6 +182,10 @@ int response_handler(zframe_t* cid, zmsg_t *response){
         }
         zframe_destroy (&frame);
     }while(more);
+
+
+            fprintf(stderr, "closing the stream\n");
+            pclose(sjr);
 
     return 0;
 }
