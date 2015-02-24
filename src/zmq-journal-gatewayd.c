@@ -507,7 +507,7 @@ static void *handler_routine (void *_args) {
             }
         }
         /* end of journal and 'follow' active? => wait some time */
-        else if ( rc == 0 && args->follow ){
+        else if ( rc == 0 && (args->follow || args->listening) ){
             sd_journal_wait( j, (uint64_t) -1 );
         }
         /* in case moving the journal pointer around produced an error */

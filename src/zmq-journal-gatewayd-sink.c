@@ -89,6 +89,7 @@ void benchmark(uint64_t initial_time, int log_counter) {
 
 static bool active = true;
 void stop_handler(int dummy) {
+    //printf("DBG: stop handler called\n");
     int rc;
     zmq_pollitem_t items [] = {
         { client, 0, ZMQ_POLLIN, 0 },
@@ -118,6 +119,7 @@ void stop_handler(int dummy) {
 
 /* Do sth with the received message */
 int response_handler(zframe_t* cid, zmsg_t *response, FILE *sjr){
+    fprintf(stderr, "DBG: in response_handler\n");
     zframe_t *frame;
     void *frame_data;
     size_t frame_size;
@@ -136,6 +138,7 @@ int response_handler(zframe_t* cid, zmsg_t *response, FILE *sjr){
         }
         else if( memcmp( frame_data, ERROR, strlen(ERROR) ) == 0 ){
             zframe_destroy (&frame);
+            fprintf(stderr, "DBG: received ERROR\n");
             ret = -1;
             break;
         }
@@ -157,11 +160,14 @@ int response_handler(zframe_t* cid, zmsg_t *response, FILE *sjr){
 			assert(((char*)frame_data)[0] == '_');
             fprintf(stderr, "DBG: before atempt to write to journal\n" );
             int fd = fileno(sjr);
-            write(fd, "\n", 1);
+            write(2, frame_data, frame_size);
             write(fd, frame_data, frame_size);
+            write(2, "\n", 1);
+            write(fd, "\n", 1);
             fprintf(stderr, "DBG: after atempt to write to journal\n" );
             log_counter++;
         }
+        fprintf(stderr, "DBG: destroying frame\n");
         zframe_destroy (&frame);
     }while(more);
     return ret;
@@ -188,7 +194,8 @@ int main ( int argc, char *argv[] ){
     int c;
 
     /*set default since filter*/
-    since_timestamp = "now"
+    //since_timestamp = "now";
+    //needs correct formatting, source does not accept token "now"
 
     while((c = getopt_long(argc, argv, "a:b:c:d:e:f:ghs:", longopts, NULL)) != -1) {
         switch (c) {
@@ -269,7 +276,7 @@ The client is used to connect to zmq-journal-gatewayd via the '--socket' option.
         zsocket_bind (client, DEFAULT_FRONTEND_SOCKET);
 
     /* for stopping the client and the gateway handler via keystroke (ctrl-c) */
-    //signal(SIGINT, stop_handler);
+    signal(SIGINT, stop_handler);
 
     zmq_pollitem_t items [] = {
         { client, 0, ZMQ_POLLIN, 0 },
@@ -284,6 +291,8 @@ The client is used to connect to zmq-journal-gatewayd via the '--socket' option.
     initial_time = zclock_time ();
 
     zhash_t *connections = zhash_new ();
+    FILE *sjr;
+
     if (!getenv(REMOTE_JOURNAL_DIRECTORY)) {
         fprintf(stderr, "%s not specified.\n", REMOTE_JOURNAL_DIRECTORY);
         exit(1);
@@ -303,27 +312,40 @@ The client is used to connect to zmq-journal-gatewayd via the '--socket' option.
 			zframe_t *client_ID = zmsg_pop (response);
             assert(client_ID);
             char* client_key = zframe_strhex(client_ID);
-            FILE *sjr = zhash_lookup (connections, client_key);
+            sjr = zhash_lookup (connections, client_key);
             if ( sjr == NULL ){
                 char pathtojournalfile[256];
                 const char *journalname = zframe_strhex(client_ID);
                 assert(strlen(remote_journal_directory) + strlen(journalname) + sizeof(sjr_cmd_format)<256);
                 sprintf (pathtojournalfile, sjr_cmd_format, remote_journal_directory, journalname);
+                fprintf(stderr, "DBG: opening journal-remote\n");
                 sjr = popen(pathtojournalfile, "w");
+                fprintf(stderr, "DBG: opnened journal-remote\n");
                 assert(sjr);
                 zhash_insert(connections, client_key, sjr);
             }
+            fprintf(stderr, "DBG: into response_handler\n");
             rc = response_handler(client_ID, response, sjr);
+            fprintf(stderr, "DBG: before flushing\n");
+            fflush(sjr);
             zmsg_destroy (&response);
-            /* end of log stream? */
+            /* end of log stream and not listening for more OR did an error occur? */
             if (rc != 0)
                 break;            
         }
     }
 
+    sjr = zhash_first(connections);
+    while(sjr != NULL){
+        pclose(sjr);
+        zhash_delete(connections, zhash_cursor(connections));
+        sjr=zhash_first(connections);
+    }
     /* clear everything up */
+    zhash_destroy(&connections);
     zsocket_destroy (ctx, client);
     zctx_destroy (&ctx);
+
     //benchmark(initial_time, log_counter);
     return 0;
 }
