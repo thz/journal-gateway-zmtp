@@ -14,6 +14,7 @@
 int main (int argc, char *argv[]){
 	FILE *sjr;
 	sjr = popen("/lib/systemd/systemd-journal-remote -o ~/minisample/logs/example.journal -", "w");
+	assert(sjr);
 	int fd = fileno(sjr);
 	char msg[128];
 	sprintf(msg, "MESSAGE=message from minisample at %i\nYMIR=ymir\n\n", time(NULL));

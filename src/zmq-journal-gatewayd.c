@@ -224,8 +224,9 @@ RequestMeta *parse_json(zmsg_t* query_msg){
     RequestMeta *args = malloc( sizeof(RequestMeta) );
     args->format = get_arg_string(json_args, "format");
     args->at_most = get_arg_int(json_args, "at_most");
-    args->since_timestamp = get_arg_date(json_args, "since_timestamp");
-    args->until_timestamp = get_arg_date(json_args, "until_timestamp");
+    //args->since_timestamp = get_arg_date(json_args, "since_timestamp");
+    args->since_timestamp = 1000000 * time(NULL);
+    args->until_timestamp = -1;
     args->since_cursor = get_arg_string(json_args, "since_cursor");
     args->until_cursor = get_arg_string(json_args, "until_cursor");
     args->follow = get_arg_bool(json_args, "follow");

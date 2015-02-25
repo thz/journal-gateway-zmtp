@@ -38,8 +38,14 @@ char    *since_timestamp=NULL, *until_timestamp=NULL, *client_socket_address=NUL
         *since_cursor=NULL, *until_cursor=NULL, *filter=NULL;
 
 char* make_json_timestamp(char *timestamp){
-    if (timestamp == NULL)
+    if (timestamp == NULL) {
         return NULL;
+	}
+
+	if (0 == strcmp("now", timestamp)) {
+		return "now";
+	}
+
     char *json_timestamp = (char *) malloc(sizeof(char) * 21);
     json_timestamp[0] = '\0'; 
     char *ptr = strtok(timestamp, " ");
@@ -160,9 +166,11 @@ int response_handler(zframe_t* cid, zmsg_t *response, FILE *sjr){
 			assert(((char*)frame_data)[0] == '_');
             fprintf(stderr, "DBG: before atempt to write to journal\n" );
             int fd = fileno(sjr);
-            write(2, frame_data, frame_size);
+
+            fprintf(stderr, "writing %lu bytes to %i: %s\n---\n", frame_size, fd, frame_data);
+			fflush(stderr);
             write(fd, frame_data, frame_size);
-            write(2, "\n", 1);
+
             write(fd, "\n", 1);
             fprintf(stderr, "DBG: after atempt to write to journal\n" );
             log_counter++;
@@ -316,22 +324,24 @@ The client is used to connect to zmq-journal-gatewayd via the '--socket' option.
             if ( sjr == NULL ){
                 char pathtojournalfile[256];
                 const char *journalname = zframe_strhex(client_ID);
-                assert(strlen(remote_journal_directory) + strlen(journalname) + sizeof(sjr_cmd_format)<256);
+                assert(strlen(remote_journal_directory) + strlen(journalname) +
+						sizeof(sjr_cmd_format)<sizeof(pathtojournalfile));
                 sprintf (pathtojournalfile, sjr_cmd_format, remote_journal_directory, journalname);
-                fprintf(stderr, "DBG: opening journal-remote\n");
+                fprintf(stderr, "DBG: opening journal-remote: [%s]\n", pathtojournalfile);
                 sjr = popen(pathtojournalfile, "w");
-                fprintf(stderr, "DBG: opnened journal-remote\n");
                 assert(sjr);
+                fprintf(stderr, "DBG: opnened journal-remote: %i\n", fileno(sjr));
                 zhash_insert(connections, client_key, sjr);
             }
             fprintf(stderr, "DBG: into response_handler\n");
             rc = response_handler(client_ID, response, sjr);
             fprintf(stderr, "DBG: before flushing\n");
             fflush(sjr);
+			fprintf(stderr, "flushed %i\n", fileno(sjr));
             zmsg_destroy (&response);
             /* end of log stream and not listening for more OR did an error occur? */
             if (rc != 0)
-                break;            
+                break;
         }
     }
 
