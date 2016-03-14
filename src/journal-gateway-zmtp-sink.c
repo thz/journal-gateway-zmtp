@@ -560,6 +560,7 @@ int try_write(int fd, const void *buf, size_t count, char *machine_id){
 
       do{
         frame = zmsg_pop (response);
+        assert(frame);
         frame_size = zframe_size(frame);
         more = zframe_more (frame);
         frame_data = zframe_data(frame);
@@ -571,18 +572,24 @@ int try_write(int fd, const void *buf, size_t count, char *machine_id){
           break;
         }
         else if( memcmp( frame_data, ERROR, strlen(ERROR) ) == 0 ){
+          sd_journal_print(LOG_ERR, "source %s: ERROR.", client_ID);
           zframe_destroy (&frame);
           ret = -1;
           break;
         }
-        else if( memcmp( frame_data, TIMEOUT, strlen(TIMEOUT) ) == 0 ) NULL;
-        else if( memcmp( frame_data, READY, strlen(READY) ) == 0 ) NULL;
-        else if( memcmp( frame_data, STOP, strlen(STOP) ) == 0 ){
-          NULL;
+        else if( memcmp( frame_data, TIMEOUT, strlen(TIMEOUT) ) == 0 ) {
+            sd_journal_print(LOG_ERR, "source %s: TIMEOUT.", client_ID);
+        }
+        else if( memcmp( frame_data, READY, strlen(READY) ) == 0 ) {
+            sd_journal_print(LOG_ERR, "source %s: READY.", client_ID);
+        }
+        else if( memcmp( frame_data, STOP, strlen(STOP) ) == 0 ) {
+            sd_journal_print(LOG_ERR, "source %s: STOP.", client_ID);
         }
         else if( memcmp( frame_data, LOGON, strlen(LOGON) ) == 0 ){
           /* send query as first response */
           char *query_string = build_query_string();
+          sd_journal_print(LOG_INFO, "source %s LOGON. query: [%s].", client_ID, query_string);
           zmsg_t *m = zmsg_new(); assert(m);
           zframe_t *queryframe = zframe_new(query_string, strlen(query_string)+1);
           assert(queryframe);
@@ -595,7 +602,7 @@ int try_write(int fd, const void *buf, size_t count, char *machine_id){
           free(query_string);
         }
         else if( memcmp( frame_data, LOGOFF, strlen(LOGOFF) ) == 0 ){
-          sd_journal_print(LOG_INFO, "one source of the gateway logged off, ID: %s", client_ID);
+          sd_journal_print(LOG_INFO, "source %s LOGOFF.", client_ID);
           Connection *lookup = NULL;
           HASH_FIND_STR( connections, client_ID, lookup );
           con_hash_delete( &connections, lookup );
@@ -604,7 +611,7 @@ int try_write(int fd, const void *buf, size_t count, char *machine_id){
         // received a log message
         else if(((char*)frame_data)[0] == '_'){
           if(!write_remote_log(frame_data, frame_size)){
-            sd_journal_print(LOG_ERR, "writing of log message to journal file failed");
+            sd_journal_print(LOG_ERR, "source %s: writing log message failed.", client_ID);
             ret = -2;
           }
         }
@@ -636,6 +643,7 @@ int try_write(int fd, const void *buf, size_t count, char *machine_id){
 
       do{
         frame = zmsg_pop (command_msg);
+        assert(frame);
         more = zframe_more (frame);
         char *json_string = zframe_strdup(frame);
         assert(json_string);
@@ -1177,8 +1185,8 @@ int try_write(int fd, const void *buf, size_t count, char *machine_id){
       assert(rc);
 
       zmq_pollitem_t items [] = {
-        { client, 0, ZMQ_POLLIN, 0 },
-        { router_control, 0, ZMQ_POLLIN, 0 },
+        { client, 0, ZMQ_POLLIN|ZMQ_POLLERR, 0 },
+        { router_control, 0, ZMQ_POLLIN|ZMQ_POLLERR, 0 },
       };
 
       zmsg_t *response;
@@ -1198,6 +1206,10 @@ int try_write(int fd, const void *buf, size_t count, char *machine_id){
       /* receive controls or logs, initiate connections to new sources */
       while ( active ){
         rc=zmq_poll (items, 2, poll_wait_time);
+        // according to zmq_poll(3) ZMQ_POLLERR shall never
+        // be returned on revents
+        assert(0 == (items[0].revents & ZMQ_POLLERR));
+        assert(0 == (items[1].revents & ZMQ_POLLERR));
         if (rc < 0) {
             // FIXME // yet another unhandled case
             // just do something better then active waiting:
